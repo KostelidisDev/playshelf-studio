@@ -5,7 +5,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from build import ENV_VERSION, resolve_version, stamp_bundle_version
+from build import (ENV_VERSION, notary_auth, resolve_version, stamp_bundle_version, version_numbers,
+                   write_windows_version_info)
 
 
 class ResolveVersionTest(unittest.TestCase):
@@ -49,3 +50,39 @@ class StampBundleVersionTest(unittest.TestCase):
         with redirect_stdout(out):
             self.assertEqual(self.stamp("nightly"), (False, "0.0.0", None))
         self.assertIn("'nightly'", out.getvalue())
+
+
+class NotaryAuthTest(unittest.TestCase):
+    API_KEY = {"NOTARY_API_KEY_PATH": "/k.p8", "NOTARY_API_KEY_ID": "ABC", "NOTARY_API_ISSUER_ID": "uuid"}
+
+    def test_keychain_profile_wins(self):
+        self.assertEqual(notary_auth({"NOTARY_KEYCHAIN_PROFILE": "ps", **self.API_KEY}), ["--keychain-profile", "ps"])
+
+    def test_api_key(self):
+        self.assertEqual(notary_auth(self.API_KEY), ["--key", "/k.p8", "--key-id", "ABC", "--issuer", "uuid"])
+
+    def test_incomplete_api_key_means_none(self):
+        self.assertIsNone(notary_auth({**self.API_KEY, "NOTARY_API_KEY_ID": ""}))
+
+
+class WindowsVersionInfoTest(unittest.TestCase):
+    def write(self, version):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return write_windows_version_info(Path(tmp.name) / "build" / "version_info.txt", version).read_text()
+
+    def test_numbers(self):
+        self.assertEqual(version_numbers("v2026.10.08-build203015"), (2026, 10, 8, 203015))
+        self.assertEqual(version_numbers("1.2.0-rc1"), (1, 2, 0, 0))
+        self.assertIsNone(version_numbers("abc1234"))
+
+    def test_clock_version(self):
+        text = self.write("v2026.10.08-build203015")
+        self.assertIn("filevers=(2026, 10, 8, 0)", text)
+        self.assertIn("StringStruct('ProductVersion', 'v2026.10.08-build203015')", text)
+        self.assertIn("StringStruct('ProductName', 'PlayShelf Studio')", text)
+
+    def test_commit_hash_version(self):
+        text = self.write("abc1234")
+        self.assertIn("prodvers=(0, 0, 0, 0)", text)
+        self.assertIn("StringStruct('FileVersion', 'abc1234')", text)

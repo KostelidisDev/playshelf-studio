@@ -2,6 +2,10 @@
 # macOS, Windows and Linux on amd64 and arm64. Pushing a v* tag also publishes
 # a GitHub Release with all six builds attached (the tag becomes the version;
 # see build.py).
+#
+# Outside pull requests, the macOS and Windows builds are signed once their
+# secrets are set (see "Code signing" in README.md). Without them the builds are
+# still produced, just unsigned (macOS: ad hoc).
 
 name: Build
 
@@ -54,6 +58,9 @@ jobs:
     name: Build (${{ matrix.platform }}-${{ matrix.arch }})
     needs: test
     runs-on: ${{ matrix.runner }}
+    env:
+      SIGN_MACOS: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && secrets.MACOS_CERTIFICATE_P12 != '' }}
+      SIGN_WINDOWS: ${{ matrix.platform == 'windows' && github.event_name != 'pull_request' && secrets.SIGNPATH_API_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +95,34 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then version="$GITHUB_REF_NAME"; else version="${COMMIT_SHA::7}"; fi
           echo "Version: ${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Set up signing and notarization (macOS)
+        if: env.SIGN_MACOS == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          # A throwaway keychain that holds only the Developer ID certificate, so codesign never prompts.
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+          if [ -z "$identity" ]; then echo "::error::No Developer ID Application identity in MACOS_CERTIFICATE_P12"; exit 1; fi
+          echo "MACOS_CODESIGN_IDENTITY=${identity}" >> "$GITHUB_ENV"
+          # build.py notarizes when these are set.
+          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary_key.p8"
+          echo "NOTARY_API_KEY_PATH=$RUNNER_TEMP/notary_key.p8" >> "$GITHUB_ENV"
+          echo "NOTARY_API_KEY_ID=${APPLE_API_KEY_ID}" >> "$GITHUB_ENV"
+          echo "NOTARY_API_ISSUER_ID=${APPLE_API_ISSUER_ID}" >> "$GITHUB_ENV"
       - name: Build
         run: python build.py "${{ steps.version.outputs.version }}"
       - name: Package
@@ -102,6 +137,38 @@ jobs:
           esac
           ls -l release
           echo "name=${base}" >> "$GITHUB_OUTPUT"
+      - name: Upload unsigned executable (Windows)
+        id: unsigned
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.name }}-unsigned
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign with SignPath (Windows)
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          # Releases get the real certificate after an approver signs off in SignPath;
+          # other builds get SignPath's test certificate, which checks the pipeline end to end.
+          signing-policy-slug: ${{ github.ref_type == 'tag' && 'release-signing' || 'test-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: ${{ github.ref_type == 'tag' && 3600 || 600 }}
+          output-artifact-directory: signed
+      - name: Replace with signed executable (Windows)
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.package.outputs.name }}.exe"
+          Copy-Item "signed/$exe" "release/$exe" -Force
+          $signature = Get-AuthenticodeSignature "release/$exe"
+          "$($signature.Status): $($signature.SignerCertificate.Subject)"
+          if ($signature.Status -eq 'NotSigned') { throw "$exe is not signed" }
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.name }}

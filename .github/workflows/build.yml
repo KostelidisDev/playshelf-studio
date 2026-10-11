@@ -1,0 +1,122 @@
+# Tests on every push and pull request, then builds the standalone app for
+# macOS, Windows and Linux on amd64 and arm64. Pushing a v* tag also publishes
+# a GitHub Release with all six builds attached (the tag becomes the version;
+# see build.py).
+
+name: Build
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.14"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Lint with flake8
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install flake8
+          # Syntax errors and undefined names fail the build; the rest only warns.
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Run tests
+        run: python -m unittest -v
+
+  build:
+    name: Build (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux,   arch: x64,   runner: ubuntu-24.04 }
+          - { platform: linux,   arch: arm64, runner: ubuntu-24.04-arm }
+          - { platform: windows, arch: x64,   runner: windows-2025 }
+          - { platform: windows, arch: arm64, runner: windows-11-arm }
+          - { platform: macos,   arch: x64,   runner: macos-15-intel }
+          - { platform: macos,   arch: arm64, runner: macos-15 }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Tk runtime (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libtk8.6
+      - name: Check Tkinter is available
+        run: python -c "import tkinter; tkinter.Tcl(); print('Tk', tkinter.TkVersion)"
+      - name: Install build dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Build
+        run: python build.py
+      - name: Package
+        id: package
+        run: |
+          # Tag name for releases, short commit otherwise.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
+          base="PlayShelfStudio-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p release
+          case "${{ matrix.platform }}" in
+            macos)   ditto -c -k --sequesterRsrc --keepParent dist/PlayShelfStudio.app "release/${base}.zip" ;;
+            linux)   tar -czf "release/${base}.tar.gz" -C dist PlayShelfStudio ;;  # tar keeps the exec bit
+            windows) cp dist/PlayShelfStudio.exe "release/${base}.exe" ;;
+          esac
+          ls -l release
+          echo "name=${base}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l release
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" --title "PlayShelf Studio $GITHUB_REF_NAME" --generate-notes --verify-tag

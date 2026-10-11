@@ -7,6 +7,8 @@ the videos, then export the `videos.csv` that the PlayShelf site serves.
 It runs on Windows, macOS and Linux. It uses only the Python standard library
 (Tkinter), and you can build it into a single standalone executable.
 
+![PlayShelf Studio: the games sidebar, the video list, and the details pane editing a video](docs/screenshots/main.png)
+
 ## Features
 
 - **Games sidebar** with video counts. It doubles as a filter: *All videos*,
@@ -15,6 +17,9 @@ It runs on Windows, macOS and Linux. It uses only the Python standard library
 - **Video list** with live search (title, game or id) and sortable columns.
 - **Details pane** for editing one video, or for setting the game of or
   deleting several videos at once.
+
+  ![Filtered to one game, with three videos selected for a bulk change](docs/screenshots/game-filter.png)
+
 - **Paste a YouTube link** (any `youtube.com` / `youtu.be` URL or a bare
   11-character id). The title fills in automatically from YouTube's oEmbed
   endpoint. You don't need an API key.

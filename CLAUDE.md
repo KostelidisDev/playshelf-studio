@@ -17,6 +17,10 @@ PLAYSHELF_STUDIO_DATA_DIR=/tmp/ps python -m playshelf_studio   # throwaway data 
 
 The local venv is `.venv/` (Python 3.14).
 
+The CI is `.github/workflows/build.yml`. It runs `flake8` (max line length 127) 
+and the tests on all three OSes, then builds macOS, Windows and Linux on
+x64 and arm64. A `v*.*.*` tag publishes a GitHub Release.
+
 ## Architecture
 
 The code is split into layers. **Each layer only imports from the layers above

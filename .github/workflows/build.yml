@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-26.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -58,8 +58,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux,   arch: x64,   runner: ubuntu-24.04 }
-          - { platform: linux,   arch: arm64, runner: ubuntu-24.04-arm }
+          - { platform: linux,   arch: x64,   runner: ubuntu-26.04 }
+          - { platform: linux,   arch: arm64, runner: ubuntu-26.04-arm }
           - { platform: windows, arch: x64,   runner: windows-2025 }
           - { platform: windows, arch: arm64, runner: windows-11-arm }
           - { platform: macos,   arch: x64,   runner: macos-15-intel }
@@ -113,7 +113,7 @@ jobs:
     name: Publish release
     if: github.ref_type == 'tag'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:

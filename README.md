@@ -52,6 +52,26 @@ PyInstaller can't cross-compile, so build on each OS you want to ship for. The
 version comes from the command-line argument, then `$PLAYSHELF_STUDIO_VERSION`,
 then the GitHub Actions tag, then the current time.
 
+### Continuous integration and releases
+
+`.github/workflows/build.yml` runs the tests on Linux, Windows and macOS for
+every push and pull request. It then builds the app for all six targets:
+macOS, Windows and Linux, each on x64 and arm64. You can download the builds
+from the run's **Artifacts**.
+
+The tag becomes the app's version, and a GitHub Release is created with all
+six builds attached:
+
+| File                                         | Contents                                 |
+| -------------------------------------------- | ---------------------------------------- |
+| `PlayShelfStudio-<tag>-macos-<arch>.zip`     | `PlayShelfStudio.app` (ad-hoc signed)    |
+| `PlayShelfStudio-<tag>-windows-<arch>.exe`   | single-file executable                   |
+| `PlayShelfStudio-<tag>-linux-<arch>.tar.gz`  | single-file executable                   |
+
+The builds aren't notarized (macOS) or code-signed (Windows). The first time
+you open the app, macOS Gatekeeper and Windows SmartScreen will warn about it.
+On macOS, right-click the app and choose **Open**.
+
 ## Data
 
 Data lives in plain CSV files in the per-user data folder:

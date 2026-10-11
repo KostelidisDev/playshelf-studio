@@ -36,8 +36,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Lint with flake8
@@ -65,8 +65,8 @@ jobs:
           - { platform: macos,   arch: x64,   runner: macos-15-intel }
           - { platform: macos,   arch: arm64, runner: macos-15 }
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -78,14 +78,22 @@ jobs:
         run: python -c "import tkinter; tkinter.Tcl(); print('Tk', tkinter.TkVersion)"
       - name: Install build dependencies
         run: python -m pip install -r requirements.txt
+      - name: Resolve version
+        id: version
+        env:
+          # On pull requests github.sha is a temporary merge commit; use the PR's head.
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # The tag for releases, the short commit hash otherwise.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then version="$GITHUB_REF_NAME"; else version="${COMMIT_SHA::7}"; fi
+          echo "Version: ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Build
-        run: python build.py
+        run: python build.py "${{ steps.version.outputs.version }}"
       - name: Package
         id: package
         run: |
-          # Tag name for releases, short commit otherwise.
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
-          base="PlayShelfStudio-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
+          base="PlayShelfStudio-${{ steps.version.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p release
           case "${{ matrix.platform }}" in
             macos)   ditto -c -k --sequesterRsrc --keepParent dist/PlayShelfStudio.app "release/${base}.zip" ;;
@@ -109,7 +117,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v4
         with:
           path: release
           merge-multiple: true

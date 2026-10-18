@@ -41,7 +41,7 @@ jobs:
         os: [ubuntu-26.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Lint with flake8
@@ -73,7 +73,7 @@ jobs:
           - { platform: macos,   arch: arm64, runner: macos-26 }
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
